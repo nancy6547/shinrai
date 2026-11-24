@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shinrai: is this eval gain real?</title>
+<meta name="description" content="Paste two eval runs. Shinrai tells you whether the gain is real or luck, using McNemar's test and a paired bootstrap. Runs the real Python package in your browser.">
+<style>
+:root{--bg:#0d0f12;--panel:#151920;--line:#262c36;--fg:#e8eaed;--muted:#8a93a3;--green:#3ecf8e;--red:#ff6b6b;--amber:#f5b64a;--accent:#7aa2ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:36px 16px 64px}
+.mono{font-family:ui-monospace,"JetBrains Mono",Consolas,monospace}
+header h1{font-size:34px;margin:0;letter-spacing:-.5px}
+header h1 span{color:var(--muted);font-weight:400;font-size:22px;margin-left:8px}
+header p{color:var(--muted);margin:8px 0 0;max-width:640px}
+.row{display:flex;gap:12px;flex-wrap:wrap;margin:26px 0 10px}
+.btn{background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px 14px;font:inherit;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#0b1020;font-weight:600}
+.drops{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.drop{border:1px dashed var(--line);border-radius:10px;padding:14px;background:var(--panel);font-size:14px;color:var(--muted);cursor:pointer}
+.drop b{color:var(--fg)}
+.drop input{display:none}
+#status{color:var(--muted);font-size:13px;margin:10px 0 0;min-height:20px}
+#result{display:none;margin-top:26px}
+.verdict{display:flex;align-items:center;gap:16px;padding:18px 20px;border-radius:12px;border:1px solid var(--line);background:var(--panel)}
+.badge{font-weight:800;font-size:22px;letter-spacing:.5px;padding:6px 14px;border-radius:8px}
+.badge.gain{background:#3ecf8e22;color:var(--green)} .badge.np{background:#f5b64a22;color:var(--amber)} .badge.reg{background:#ff6b6b22;color:var(--red)}
+.verdict .why{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+.stat .v{font-size:22px;font-weight:700;margin-top:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-top:12px}
+.card h3{margin:0 0 12px;font-size:14px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+.flips{display:flex;height:26px;border-radius:6px;overflow:hidden;background:#0000}
+.flips div{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#0b1020;transition:flex-grow .6s}
+.ci svg{width:100%;height:84px;display:block}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:500}
+td.num{font-variant-numeric:tabular-nums}
+.worse td{color:var(--red)}
+.bar{height:8px;border-radius:4px;display:inline-block;vertical-align:middle}
+pre.term{background:#07080a;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:13px;margin:0;color:#cfd6e2}
+.cols{display:grid;grid-template-columns:1.1fr .9fr;gap:12px}
+footer{margin-top:36px;color:var(--muted);font-size:13px}
+footer a,header a{color:var(--accent)}
+@media(max-width:720px){.drops,.cols{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>shinrai <span>信頼 · trust</span></h1>
+  <p>Your eval score went up. Is the gain real, or did you get lucky? Load two runs over the same questions and Shinrai pairs them, counts what flipped, and tests it.</p>
+</header>
+
+<div class="row">
+  <button class="btn primary" id="ex-small">Example: 144 → 151 / 160</button>
+  <button class="btn" id="ex-big">Example: 144 → 158 / 160</button>
+</div>
+<div class="drops">
+  <label class="drop" id="drop-before"><b>before.jsonl</b> — drop or click<br><span class="mono" style="font-size:12px">{"id": "q1", "correct": true, "tag": "pin"}</span><input type="file" accept=".jsonl,.json,.txt" id="f-before"></label>
+  <label class="drop" id="drop-after"><b>after.jsonl</b> — drop or click<br><span class="mono" style="font-size:12px">one line per question, same ids</span><input type="file" accept=".jsonl,.json,.txt" id="f-after"></label>
+</div>
+<div id="status">Loading Python in your browser…</div>
+
+<section id="result">
+  <div class="verdict"><span class="badge" id="badge"></span><span class="why" id="why"></span></div>
+  <div class="grid">
+    <div class="stat"><div class="k">accuracy</div><div class="v mono" id="s-acc"></div></div>
+    <div class="stat"><div class="k">change</div><div class="v mono" id="s-delta"></div></div>
+    <div class="stat"><div class="k">McNemar p</div><div class="v mono" id="s-p"></div></div>
+    <div class="stat"><div class="k">questions</div><div class="v mono" id="s-n"></div></div>
+  </div>
+  <div class="card">
+    <h3>What flipped</h3>
+    <div class="flips" id="flips"></div>
+    <div style="color:var(--muted);font-size:13px;margin-top:8px">Questions that stayed the same carry no information about the change. Only flips count.</div>
+  </div>
+  <div class="card ci">
+    <h3>95% range for the real change (paired bootstrap)</h3>
+    <svg id="ci" viewBox="0 0 900 84" preserveAspectRatio="none"></svg>
+  </div>
+  <div class="cols">
+    <div class="card"><h3>By tag</h3><table id="tags"></table></div>
+    <div class="card"><h3>CLI output</h3><pre class="term mono" id="term"></pre></div>
+  </div>
+</section>
+
+<footer>This page runs the actual <span class="mono">shinrai</span> Python package in your browser with Pyodide. Your files never leave your machine. · <a href="https://github.com/nancy6547/shinrai">github.com/nancy6547/shinrai</a> · built by <a href="https://github.com/nancy6547">Nancy Singh</a></footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const status = t => $('status').textContent = t;
+let py, files = {before: null, after: null};
+
+async function boot() {
+  py = await loadPyodide();
+  py.FS.mkdirTree('/app/shinrai');
+  for (const f of ['__init__.py', 'compare.py', 'stats.py']) {
+    py.FS.writeFile('/app/shinrai/' + f, await (await fetch('shinrai/' + f)).text());
+  }
+  py.runPython("import sys; sys.path.insert(0, '/app')");
+  status('Ready. Pick an example or drop your own two files.');
+}
+
+async function run(beforeText, afterText) {
+  status('Running McNemar + 10,000 bootstrap resamples…');
+  py.FS.writeFile('/app/before.jsonl', beforeText);
+  py.FS.writeFile('/app/after.jsonl', afterText);
+  const out = py.runPython(`
+import json
+from shinrai import compare, load, render
+r = compare(load('/app/before.jsonl'), load('/app/after.jsonl'))
+json.dumps({**r.__dict__, "delta": r.delta, "text": render(r)})`);
+  show(JSON.parse(out));
+  status('Done. Computed locally in your browser.');
+}
+
+const pts = x => (x >= 0 ? '+' : '') + (x * 100).toFixed(1);
+function show(r) {
+  $('result').style.display = 'block';
+  const b = $('badge');
+  b.textContent = r.verdict;
+  b.className = 'badge ' + ({'REAL GAIN': 'gain', 'NOT PROVEN': 'np'}[r.verdict] || 'reg');
+  $('why').textContent = r.verdict === 'REAL GAIN' ? 'The whole range is above zero. This improvement is very unlikely to be luck.'
+    : r.verdict === 'NOT PROVEN' ? 'The range includes zero. The gain could be luck. Test on more questions before you ship.'
+    : 'The whole range is below zero. The change made things worse.';
+  $('s-acc').textContent = (r.acc_before * 100).toFixed(1) + '→' + (r.acc_after * 100).toFixed(1) + '%';
+  $('s-delta').textContent = pts(r.delta) + ' pts';
+  $('s-p').textContent = r.p_value.toFixed(4);
+  $('s-n').textContent = r.n;
+  const g = r.gained.length, l = r.lost.length;
+  $('flips').innerHTML = `<div style="flex-grow:${g};background:var(--green)">${g} fixed</div><div style="flex-grow:${l};background:var(--red)">${l} broken</div>`;
+  drawCI(r.ci[0], r.ci[1], r.delta);
+  const rows = Object.entries(r.slices);
+  const maxv = Math.max(1, ...rows.map(([, s]) => Math.max(s[1], s[2])));
+  $('tags').innerHTML = '<tr><th>tag</th><th>n</th><th>fixed</th><th>broken</th></tr>' + rows.map(([t, s]) =>
+    `<tr class="${s[2] > s[1] ? 'worse' : ''}"><td class="mono">${t}${s[2] > s[1] ? ' ← got worse' : ''}</td><td class="num">${s[0]}</td>` +
+    `<td class="num">${s[1]} <span class="bar" style="width:${s[1] / maxv * 60}px;background:var(--green)"></span></td>` +
+    `<td class="num">${s[2]} <span class="bar" style="width:${s[2] / maxv * 60}px;background:var(--red)"></span></td></tr>`).join('');
+  $('term').textContent = '$ shinrai compare before.jsonl after.jsonl\n\n' + r.text;
+  $('result').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function drawCI(lo, hi, d) {
+  const min = Math.min(-0.05, lo - 0.02), max = Math.max(0.15, hi + 0.02);
+  const x = v => 30 + (v - min) / (max - min) * 840;
+  const col = lo > 0 ? 'var(--green)' : hi < 0 ? 'var(--red)' : 'var(--amber)';
+  let ticks = '';
+  for (let t = Math.ceil(min * 20) / 20; t <= max + 1e-9; t += 0.05)
+    ticks += `<line x1="${x(t)}" x2="${x(t)}" y1="52" y2="58" stroke="#3a4250"/><text x="${x(t)}" y="74" fill="#8a93a3" font-size="12" text-anchor="middle">${pts(t)}</text>`;
+  $('ci').innerHTML = `<line x1="30" x2="870" y1="55" y2="55" stroke="#3a4250"/>${ticks}
+    <line x1="${x(0)}" x2="${x(0)}" y1="8" y2="58" stroke="#e8eaed" stroke-dasharray="3 3"/>
+    <text x="${x(0) + 5}" y="16" fill="#e8eaed" font-size="12">no change</text>
+    <rect x="${x(lo)}" y="26" width="${x(hi) - x(lo)}" height="12" rx="6" fill="${col}" opacity=".85"/>
+    <circle cx="${x(d)}" cy="32" r="7" fill="#0d0f12" stroke="${col}" stroke-width="3"/>
+    <text x="${x(lo)}" y="50" fill="${col}" font-size="12" text-anchor="middle">${pts(lo)}</text>
+    <text x="${x(hi)}" y="50" fill="${col}" font-size="12" text-anchor="middle">${pts(hi)}</text>`;
+}
+
+async function example(name) {
+  const [b, a] = await Promise.all(['before', 'after'].map(k => fetch(`examples/${name}/${k}.jsonl`).then(r => r.text())));
+  run(b, a);
+}
+$('ex-small').onclick = () => example('small');
+$('ex-big').onclick = () => example('big');
+for (const k of ['before', 'after']) {
+  const take = async file => { files[k] = await file.text(); $('drop-' + k).querySelector('b').textContent = file.name + ' ✓'; if (files.before && files.after) run(files.before, files.after); };
+  $('f-' + k).onchange = e => e.target.files[0] && take(e.target.files[0]);
+  const d = $('drop-' + k);
+  d.ondragover = e => { e.preventDefault(); d.style.borderColor = 'var(--accent)'; };
+  d.ondrop = e => { e.preventDefault(); e.dataTransfer.files[0] && take(e.dataTransfer.files[0]); };
+}
+boot().catch(e => status('Could not load Python: ' + e));
+</script>
+</body>
+</html>

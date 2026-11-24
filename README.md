@@ -1,5 +1,7 @@
 # Shinrai
 
+**[Try it in your browser](https://nancy6547.github.io/shinrai/)** (runs this Python package locally with Pyodide, nothing is uploaded)
+
 **Is this eval gain real?** Compare two runs of the same test set (before and after a fine-tune, a prompt change or a new model) and get a verdict you can defend.
 
 Shinrai (信頼) means "trust".
